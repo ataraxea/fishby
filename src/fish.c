@@ -18,7 +18,16 @@ void fish_init(Fish *fish)
     };
 }
 
-void fish_update(Fish *fish, float dt, int rows, int cols)
+
+void fish_update(
+    Fish *fish,
+    float dt,
+    int rows,
+    int cols,
+    int has_target,
+    float target_x,
+    float target_y
+)
 {
     if (rows < 7 || cols < 20)
         return;
@@ -47,35 +56,53 @@ void fish_update(Fish *fish, float dt, int rows, int cols)
         TAU * 4.0f
     );
 
-    /* Natural speed variation */
-    float speed = 10.0f
-        + 2.5f * sinf(fish->phase * 0.75f);
+    float target_vx;
+    float target_vy;
 
-    /* Anticipate aquarium walls */
-    float margin = fminf(
-        5.0f, (right - left) * 0.25f
-    );
+    if (has_target) {
 
-    if (fish->heading > 0 && fish->x >= right - margin)
-        fish->heading = -1;
-    else if (fish->heading < 0 && fish->x <= left + margin)
-        fish->heading = 1;
+        /* Chase the nearest food particle */
+        float center_x = fish->x
+            + (FISH_WIDTH - 1) * 0.5f;
 
-    float target_vx = speed * fish->heading;
+        float dx = target_x - center_x;
+        float dy = target_y - fish->y;
 
-    /* Organic swimming trajectory */
-    float target_y = middle + amplitude * (
-        0.75f * sinf(fish->phase)
-        + 0.25f * sinf(fish->phase * 1.75f)
-    );
+        target_vx = clampf(dx * 2.5f, -16.0f, 16.0f);
+        target_vy = clampf(dy * 2.5f, -7.0f, 7.0f);
 
-    float target_vy = clampf(
-        (target_y - fish->y) * 1.8f,
-        -5.0f,
-        5.0f
-    );
+    } else {
 
-    /* Frame-rate independent velocity smoothing */
+        /* Natural swimming */
+        float speed = 10.0f
+            + 2.5f * sinf(fish->phase * 0.75f);
+
+        float margin = fminf(
+            5.0f, (right - left) * 0.25f
+        );
+
+        if (fish->heading > 0 &&
+            fish->x >= right - margin)
+            fish->heading = -1;
+        else if (fish->heading < 0 &&
+                 fish->x <= left + margin)
+            fish->heading = 1;
+
+        target_vx = speed * fish->heading;
+
+        float desired_y = middle + amplitude * (
+            0.75f * sinf(fish->phase)
+            + 0.25f * sinf(fish->phase * 1.75f)
+        );
+
+        target_vy = clampf(
+            (desired_y - fish->y) * 1.8f,
+            -5.0f,
+            5.0f
+        );
+    }
+
+    /* Smooth acceleration and deceleration */
     float blend = 1.0f - expf(-3.5f * dt);
 
     fish->vx += (target_vx - fish->vx) * blend;
@@ -89,13 +116,11 @@ void fish_update(Fish *fish, float dt, int rows, int cols)
         fish->y + fish->vy * dt, top, bottom
     );
 
-    /* Turn only after changing movement direction */
     if (fish->vx > 0.6f)
         fish->direction = 1;
     else if (fish->vx < -0.6f)
         fish->direction = -1;
 
-    /* Tail animation depends on swimming speed */
     fish->tail_phase = fmodf(
         fish->tail_phase
         + dt * (4.0f + fabsf(fish->vx) * 0.35f),
@@ -106,6 +131,7 @@ void fish_update(Fish *fish, float dt, int rows, int cols)
         fish->blink_timer + dt, 7.0f
     );
 }
+
 
 void fish_draw(const Fish *fish)
 {

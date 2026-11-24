@@ -1,19 +1,22 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "aquarium.h"
 #include <ncurses.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
 #include <errno.h>
+#include <limits.h>
 
 #include "fish.h"
 #include "bubbles.h"
+#include "aquarium.h"
+#include "food.h"
 
 #define TARGET_FPS 60L
 #define FRAME_NS (1000000000L / TARGET_FPS)
 #define MAX_DT 0.05f
 #define BUBBLE_INTERVAL 0.65f
+#define FEED_COOLDOWN 0.3f
 
 static float elapsed(struct timespec start,
                      struct timespec end)
@@ -55,7 +58,10 @@ int main(void)
     curs_set(0);
     keypad(stdscr, TRUE);
     nodelay(stdscr, TRUE);
+
     aquarium_init();
+
+    srand((unsigned int)time(NULL));
 
     Fish fish;
     fish_init(&fish);
@@ -69,6 +75,10 @@ int main(void)
     }
 
     float bubble_timer = 0.0f;
+    float feed_cooldown = 0.0f;
+
+    unsigned long eaten = 0;
+
     int running = 1;
     int exit_status = EXIT_SUCCESS;
 
@@ -87,6 +97,11 @@ int main(void)
         if (dt < 0.0f)
             dt = 0.0f;
 
+        int rows, cols;
+        getmaxyx(stdscr, rows, cols);
+
+        feed_cooldown -= dt;
+
         /* Process input */
         for (int i = 0; i < 32; i++) {
             int ch = getch();
@@ -98,22 +113,46 @@ int main(void)
                 running = 0;
                 break;
             }
+
+            if ((ch == 'f' || ch == 'F') &&
+                feed_cooldown <= 0.0f &&
+                rows >= 7 && cols >= 20) {
+
+                food_spawn(rows, cols);
+                feed_cooldown = FEED_COOLDOWN;
+            }
         }
 
         if (!running)
             break;
 
-        int rows, cols;
         getmaxyx(stdscr, rows, cols);
 
         erase();
 
         bubbles_update(dt, rows, cols);
+        food_update(dt, rows, cols);
 
         if (rows >= 7 && cols >= 20) {
 
-            /* Update fish physics */
-            fish_update(&fish, dt, rows, cols);
+            float target_x = 0.0f;
+            float target_y = 0.0f;
+
+            int has_target = food_nearest(
+                &fish, &target_x, &target_y
+            );
+
+            fish_update(
+                &fish, dt, rows, cols,
+                has_target, target_x, target_y
+            );
+
+            unsigned int consumed = food_eat(&fish);
+
+            if (ULONG_MAX - eaten >= consumed)
+                eaten += consumed;
+            else
+                eaten = ULONG_MAX;
 
             /* Spawn bubbles */
             bubble_timer += dt;
@@ -132,8 +171,7 @@ int main(void)
                 bubble_timer -= BUBBLE_INTERVAL;
             }
 
-            /* Draw aquarium */
-            /* Draw aquarium */
+            /* Draw environment */
             aquarium_draw(dt, rows, cols);
 
             /* Draw bubbles */
@@ -141,23 +179,40 @@ int main(void)
             bubbles_draw();
             aquarium_color_off(AQUA_BUBBLE);
 
+            /* Draw food */
+            aquarium_color_on(AQUA_SAND);
+            food_draw();
+            aquarium_color_off(AQUA_SAND);
+
             /* Draw fish */
             aquarium_color_on(AQUA_FISH);
             fish_draw(&fish);
             aquarium_color_off(AQUA_FISH);
 
-            /* Draw interface */
-            mvaddstr(rows - 2, 2, "[Q] Quit");
+            /* Status bar */
+            char status[128];
+
+            snprintf(
+                status,
+                sizeof(status),
+                "[F] Feed | [Q] Quit | Eaten: %lu",
+                eaten
+            );
+
+            mvaddnstr(
+                rows - 2,
+                2,
+                status,
+                cols - 3
+            );
 
         } else {
             addnstr("Resize terminal", cols);
         }
 
-        /* Present frame */
         wnoutrefresh(stdscr);
         doupdate();
 
-        /* Limit frame rate */
         if (wait_next_frame(current) != 0) {
             exit_status = EXIT_FAILURE;
             break;

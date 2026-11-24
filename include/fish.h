@@ -17,7 +17,15 @@ typedef struct {
 } Fish;
 
 void fish_init(Fish *fish);
-void fish_update(Fish *fish, float dt, int rows, int cols);
+void fish_update(
+    Fish *fish,
+    float dt,
+    int rows,
+    int cols,
+    int has_target,
+    float target_x,
+    float target_y
+);
 void fish_draw(const Fish *fish);
 
 #endif
