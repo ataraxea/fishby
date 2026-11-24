@@ -5,18 +5,21 @@
 #include <stdio.h>
 #include <time.h>
 #include <errno.h>
+#include <unistd.h>
 
 #include "fish.h"
 #include "bubbles.h"
 #include "aquarium.h"
 #include "food.h"
 #include "pet.h"
+#include "state.h"
 
 #define TARGET_FPS 60L
 #define FRAME_NS (1000000000L / TARGET_FPS)
 #define MAX_DT 0.05f
 #define BUBBLE_INTERVAL 0.65f
 #define FEED_COOLDOWN 0.3f
+#define SAVE_INTERVAL 30.0f
 
 static float elapsed(struct timespec start,
                      struct timespec end)
@@ -48,10 +51,14 @@ static int wait_next_frame(struct timespec start)
     return result;
 }
 
-static void draw_status(const Pet *pet,
-                        int rows, int cols)
+static void draw_status(
+    const Pet *pet,
+    int rows,
+    int cols,
+    int save_error
+)
 {
-    char status[128];
+    char status[192];
 
     if (cols >= 65) {
         snprintf(
@@ -74,14 +81,8 @@ static void draw_status(const Pet *pet,
         );
     }
 
-    mvaddnstr(
-        rows - 2,
-        2,
-        status,
-        cols - 3
-    );
+    mvaddnstr(rows - 2, 2, status, cols - 3);
 
-    /* Display fish thoughts in the top border */
     if (cols >= 40) {
         char thought[64];
 
@@ -89,17 +90,14 @@ static void draw_status(const Pet *pet,
             thought,
             sizeof(thought),
             " %s ",
-            pet_thought(pet)
+            save_error
+                ? "save unavailable"
+                : pet_thought(pet)
         );
 
         aquarium_color_on(AQUA_FISH);
 
-        mvaddnstr(
-            0,
-            12,
-            thought,
-            cols - 13
-        );
+        mvaddnstr(0, 12, thought, cols - 13);
 
         aquarium_color_off(AQUA_FISH);
     }
@@ -107,8 +105,32 @@ static void draw_status(const Pet *pet,
 
 int main(void)
 {
-    if (initscr() == NULL)
+    Fish fish;
+    fish_init(&fish);
+
+    Pet pet;
+    pet_init(&pet);
+
+    /* Initialize persistent storage */
+    int state_dir = state_open();
+    int save_error = 0;
+
+    if (state_dir < 0) {
+        save_error = 1;
+    } else if (state_load(state_dir, &pet) < 0) {
+
+        /* Preserve invalid or inaccessible saves */
+        close(state_dir);
+        state_dir = -1;
+        save_error = 1;
+    }
+
+    if (initscr() == NULL) {
+        if (state_dir >= 0)
+            close(state_dir);
+
         return EXIT_FAILURE;
+    }
 
     cbreak();
     noecho();
@@ -120,22 +142,21 @@ int main(void)
 
     srand((unsigned int)time(NULL));
 
-    Fish fish;
-    fish_init(&fish);
-
-    Pet pet;
-    pet_init(&pet);
-
     struct timespec previous;
     struct timespec current;
 
     if (clock_gettime(CLOCK_MONOTONIC, &previous) != 0) {
         endwin();
+
+        if (state_dir >= 0)
+            close(state_dir);
+
         return EXIT_FAILURE;
     }
 
     float bubble_timer = 0.0f;
     float feed_cooldown = 0.0f;
+    float save_timer = 0.0f;
 
     int running = 1;
     int exit_status = EXIT_SUCCESS;
@@ -216,7 +237,7 @@ int main(void)
                 target_y
             );
 
-            /* Consume food and update pet state */
+            /* Consume food */
             unsigned int consumed = 0;
 
             if (fish.recovery_timer <= 0.0f)
@@ -259,7 +280,12 @@ int main(void)
             fish_draw(&fish);
             aquarium_color_off(AQUA_FISH);
 
-            draw_status(&pet, rows, cols);
+            draw_status(
+                &pet,
+                rows,
+                cols,
+                save_error
+            );
 
         } else {
             addnstr("Resize terminal", cols);
@@ -269,6 +295,18 @@ int main(void)
         wnoutrefresh(stdscr);
         doupdate();
 
+        /* Periodic autosave */
+        save_timer += dt;
+
+        if (save_timer >= SAVE_INTERVAL) {
+            if (state_dir >= 0)
+                save_error = state_save(
+                    state_dir, &pet
+                ) < 0;
+
+            save_timer = 0.0f;
+        }
+
         /* Limit frame rate */
         if (wait_next_frame(current) != 0) {
             exit_status = EXIT_FAILURE;
@@ -277,6 +315,18 @@ int main(void)
     }
 
     endwin();
+
+    /* Save pet state before exiting */
+    if (state_dir >= 0) {
+        save_error = state_save(
+            state_dir, &pet
+        ) < 0;
+
+        close(state_dir);
+    }
+
+    if (save_error)
+        fprintf(stderr, "fishby: state unavailable\n");
 
     if (exit_status != EXIT_SUCCESS)
         fprintf(stderr, "fishby: animation timer failed\n");
