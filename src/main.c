@@ -6,6 +6,7 @@
 #include <time.h>
 #include <errno.h>
 #include <unistd.h>
+#include <string.h>
 
 #include "fish.h"
 #include "bubbles.h"
@@ -13,24 +14,28 @@
 #include "food.h"
 #include "pet.h"
 #include "state.h"
+#include "cli.h"
 
-#define TARGET_FPS 60L
-#define FRAME_NS (1000000000L / TARGET_FPS)
 #define MAX_DT 0.05f
 #define BUBBLE_INTERVAL 0.65f
 #define FEED_COOLDOWN 0.3f
 #define SAVE_INTERVAL 30.0f
 
-static float elapsed(struct timespec start,
-                     struct timespec end)
+static float elapsed(
+    struct timespec start,
+    struct timespec end
+)
 {
     return (float)(end.tv_sec - start.tv_sec)
         + (float)(end.tv_nsec - start.tv_nsec) / 1e9f;
 }
 
-static int wait_next_frame(struct timespec start)
+static int wait_next_frame(
+    struct timespec start,
+    long frame_ns
+)
 {
-    start.tv_nsec += FRAME_NS;
+    start.tv_nsec += frame_ns;
 
     if (start.tv_nsec >= 1000000000L) {
         start.tv_sec++;
@@ -53,6 +58,7 @@ static int wait_next_frame(struct timespec start)
 
 static void draw_status(
     const Pet *pet,
+    const CliOptions *options,
     int rows,
     int cols,
     int save_error
@@ -83,28 +89,76 @@ static void draw_status(
 
     mvaddnstr(rows - 2, 2, status, cols - 3);
 
-    if (cols >= 40) {
+    /* Draw the title and fish name */
+    char title[64];
+
+    if (strcmp(options->name, "fishby") == 0) {
+        snprintf(title, sizeof(title), " fishby ");
+    } else {
+        snprintf(
+            title,
+            sizeof(title),
+            " fishby / %s ",
+            options->name
+        );
+    }
+
+    aquarium_color_on(AQUA_BORDER);
+
+    mvaddnstr(0, 2, title, cols - 3);
+
+    aquarium_color_off(AQUA_BORDER);
+
+    /* Draw fish thoughts */
+    int thought_x = 3 + (int)strlen(title);
+
+    if (cols - thought_x >= 20) {
         char thought[64];
+
+        const char *message = pet_thought(pet);
+
+        if (save_error)
+            message = "save unavailable";
+        else if (options->no_save)
+            message = "session only";
 
         snprintf(
             thought,
             sizeof(thought),
             " %s ",
-            save_error
-                ? "save unavailable"
-                : pet_thought(pet)
+            message
         );
 
         aquarium_color_on(AQUA_FISH);
 
-        mvaddnstr(0, 12, thought, cols - 13);
+        mvaddnstr(
+            0,
+            thought_x,
+            thought,
+            cols - thought_x - 1
+        );
 
         aquarium_color_off(AQUA_FISH);
     }
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    CliOptions options;
+
+    CliResult result = cli_parse(
+        &options, argc, argv
+    );
+
+    if (result == CLI_EXIT)
+        return EXIT_SUCCESS;
+
+    if (result == CLI_ERROR)
+        return EXIT_FAILURE;
+
+    const long frame_ns =
+        1000000000L / options.fps;
+
     Fish fish;
     fish_init(&fish);
 
@@ -112,17 +166,19 @@ int main(void)
     pet_init(&pet);
 
     /* Initialize persistent storage */
-    int state_dir = state_open();
+    int state_dir = -1;
     int save_error = 0;
 
-    if (state_dir < 0) {
-        save_error = 1;
-    } else if (state_load(state_dir, &pet) < 0) {
+    if (!options.no_save) {
+        state_dir = state_open();
 
-        /* Preserve invalid or inaccessible saves */
-        close(state_dir);
-        state_dir = -1;
-        save_error = 1;
+        if (state_dir < 0) {
+            save_error = 1;
+        } else if (state_load(state_dir, &pet) < 0) {
+            close(state_dir);
+            state_dir = -1;
+            save_error = 1;
+        }
     }
 
     if (initscr() == NULL) {
@@ -138,7 +194,8 @@ int main(void)
     keypad(stdscr, TRUE);
     nodelay(stdscr, TRUE);
 
-    aquarium_init();
+    if (!options.no_color)
+        aquarium_init();
 
     srand((unsigned int)time(NULL));
 
@@ -182,7 +239,7 @@ int main(void)
         if (feed_cooldown > 0.0f)
             feed_cooldown -= dt;
 
-        /* Process keyboard input */
+        /* Process input */
         for (int i = 0; i < 32; i++) {
             int ch = getch();
 
@@ -216,7 +273,6 @@ int main(void)
         food_update(dt, rows, cols);
 
         if (rows >= 7 && cols >= 20) {
-
             float target_x = 0.0f;
             float target_y = 0.0f;
 
@@ -282,6 +338,7 @@ int main(void)
 
             draw_status(
                 &pet,
+                &options,
                 rows,
                 cols,
                 save_error
@@ -296,19 +353,20 @@ int main(void)
         doupdate();
 
         /* Periodic autosave */
-        save_timer += dt;
+        if (state_dir >= 0) {
+            save_timer += dt;
 
-        if (save_timer >= SAVE_INTERVAL) {
-            if (state_dir >= 0)
+            if (save_timer >= SAVE_INTERVAL) {
                 save_error = state_save(
                     state_dir, &pet
                 ) < 0;
 
-            save_timer = 0.0f;
+                save_timer = 0.0f;
+            }
         }
 
         /* Limit frame rate */
-        if (wait_next_frame(current) != 0) {
+        if (wait_next_frame(current, frame_ns) != 0) {
             exit_status = EXIT_FAILURE;
             break;
         }
@@ -316,7 +374,7 @@ int main(void)
 
     endwin();
 
-    /* Save pet state before exiting */
+    /* Save state before exiting */
     if (state_dir >= 0) {
         save_error = state_save(
             state_dir, &pet

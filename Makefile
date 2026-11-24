@@ -11,14 +11,16 @@ SRC = src/main.c \
       src/aquarium.c \
       src/food.c \
       src/pet.c \
-      src/state.c
+      src/state.c \
+      src/cli.c
 
 HEADERS = include/fish.h \
           include/bubbles.h \
           include/aquarium.h \
           include/food.h \
           include/pet.h \
-          include/state.h
+          include/state.h \
+          include/cli.h
 
 .PHONY: all clean
 
