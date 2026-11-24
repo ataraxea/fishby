@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include "aquarium.h"
 #include <ncurses.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -54,6 +55,7 @@ int main(void)
     curs_set(0);
     keypad(stdscr, TRUE);
     nodelay(stdscr, TRUE);
+    aquarium_init();
 
     Fish fish;
     fish_init(&fish);
@@ -131,16 +133,18 @@ int main(void)
             }
 
             /* Draw aquarium */
-            box(stdscr, 0, 0);
+            /* Draw aquarium */
+            aquarium_draw(dt, rows, cols);
 
-            mvaddstr(0, 2, " fishby ");
-
-            for (int x = 1; x < cols - 1; x += 2)
-                mvaddch(1, x, '~');
-
-            /* Draw entities */
+            /* Draw bubbles */
+            aquarium_color_on(AQUA_BUBBLE);
             bubbles_draw();
+            aquarium_color_off(AQUA_BUBBLE);
+
+            /* Draw fish */
+            aquarium_color_on(AQUA_FISH);
             fish_draw(&fish);
+            aquarium_color_off(AQUA_FISH);
 
             /* Draw interface */
             mvaddstr(rows - 2, 2, "[Q] Quit");

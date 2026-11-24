@@ -7,10 +7,12 @@ TARGET = fishby
 
 SRC = src/main.c \
       src/fish.c \
-      src/bubbles.c
+      src/bubbles.c \
+      src/aquarium.c
 
 HEADERS = include/fish.h \
-          include/bubbles.h
+          include/bubbles.h \
+          include/aquarium.h
 
 .PHONY: all clean
 
