@@ -1,0 +1,4 @@
+/fishby
+*.o
+*.core
+core
