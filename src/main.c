@@ -100,9 +100,10 @@ int main(void)
         int rows, cols;
         getmaxyx(stdscr, rows, cols);
 
-        feed_cooldown -= dt;
+        if (feed_cooldown > 0.0f)
+            feed_cooldown -= dt;
 
-        /* Process input */
+        /* Process keyboard input */
         for (int i = 0; i < 32; i++) {
             int ch = getch();
 
@@ -130,6 +131,7 @@ int main(void)
 
         erase();
 
+        /* Update particles */
         bubbles_update(dt, rows, cols);
         food_update(dt, rows, cols);
 
@@ -138,21 +140,38 @@ int main(void)
             float target_x = 0.0f;
             float target_y = 0.0f;
 
+            /* Find the current food target */
             int has_target = food_nearest(
-                &fish, &target_x, &target_y
+                &fish,
+                &target_x,
+                &target_y
             );
 
+            /* Update fish movement */
             fish_update(
-                &fish, dt, rows, cols,
-                has_target, target_x, target_y
+                &fish,
+                dt,
+                rows,
+                cols,
+                has_target,
+                target_x,
+                target_y
             );
 
-            unsigned int consumed = food_eat(&fish);
+            /* Consume food and recover */
+            unsigned int consumed = 0;
 
-            if (ULONG_MAX - eaten >= consumed)
-                eaten += consumed;
-            else
-                eaten = ULONG_MAX;
+            if (fish.recovery_timer <= 0.0f)
+                consumed = food_eat(&fish);
+
+            if (consumed > 0) {
+                fish_on_eat(&fish);
+
+                if (ULONG_MAX - eaten >= consumed)
+                    eaten += consumed;
+                else
+                    eaten = ULONG_MAX;
+            }
 
             /* Spawn bubbles */
             bubble_timer += dt;
@@ -171,7 +190,7 @@ int main(void)
                 bubble_timer -= BUBBLE_INTERVAL;
             }
 
-            /* Draw environment */
+            /* Draw aquarium */
             aquarium_draw(dt, rows, cols);
 
             /* Draw bubbles */
@@ -189,7 +208,7 @@ int main(void)
             fish_draw(&fish);
             aquarium_color_off(AQUA_FISH);
 
-            /* Status bar */
+            /* Draw status bar */
             char status[128];
 
             snprintf(
@@ -210,9 +229,11 @@ int main(void)
             addnstr("Resize terminal", cols);
         }
 
+        /* Present frame */
         wnoutrefresh(stdscr);
         doupdate();
 
+        /* Limit frame rate */
         if (wait_next_frame(current) != 0) {
             exit_status = EXIT_FAILURE;
             break;

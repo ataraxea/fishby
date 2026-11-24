@@ -9,6 +9,7 @@
 #define FOOD_PER_FEED 3
 
 static Food particles[MAX_FOOD];
+static int target_index = -1;
 
 void food_spawn(int rows, int cols)
 {
@@ -82,9 +83,22 @@ void food_draw(void)
     }
 }
 
+
 int food_nearest(const Fish *fish, float *x, float *y)
 {
-    int nearest = -1;
+    /* Keep chasing the current target */
+    if (target_index >= 0 &&
+        target_index < MAX_FOOD &&
+        particles[target_index].active) {
+
+        *x = particles[target_index].x;
+        *y = particles[target_index].y;
+
+        return 1;
+    }
+
+    target_index = -1;
+
     float best_distance = INFINITY;
 
     float center_x = fish->x
@@ -97,24 +111,26 @@ int food_nearest(const Fish *fish, float *x, float *y)
             continue;
 
         float dx = food->x - center_x;
-        float dy = food->y - fish->y;
+        float dy = (food->y - fish->y) * 2.0f;
 
         float distance = dx * dx + dy * dy;
 
         if (distance < best_distance) {
             best_distance = distance;
-            nearest = i;
+            target_index = i;
         }
     }
 
-    if (nearest < 0)
+    if (target_index < 0)
         return 0;
 
-    *x = particles[nearest].x;
-    *y = particles[nearest].y;
+    *x = particles[target_index].x;
+    *y = particles[target_index].y;
 
     return 1;
 }
+
+
 
 unsigned int food_eat(const Fish *fish)
 {
@@ -126,14 +142,24 @@ unsigned int food_eat(const Fish *fish)
         if (!food->active)
             continue;
 
-        if (food->x >= fish->x - 0.8f &&
-            food->x <= fish->x + FISH_WIDTH - 0.2f &&
-            fabsf(food->y - fish->y) <= 0.8f) {
+        float left = fish->x - 1.0f;
+        float right = fish->x + FISH_WIDTH;
+
+        float dy = fabsf(food->y - fish->y);
+
+        if (food->x >= left &&
+            food->x <= right &&
+            dy <= 1.0f) {
 
             food->active = 0;
+
+            if (target_index == i)
+                target_index = -1;
+
             eaten++;
         }
     }
 
     return eaten;
 }
+

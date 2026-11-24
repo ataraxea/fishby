@@ -10,6 +10,7 @@ typedef struct {
     float phase;
     float tail_phase;
     float blink_timer;
+    float recovery_timer;
 
     int direction;
     int heading;
@@ -17,6 +18,7 @@ typedef struct {
 } Fish;
 
 void fish_init(Fish *fish);
+
 void fish_update(
     Fish *fish,
     float dt,
@@ -26,6 +28,8 @@ void fish_update(
     float target_x,
     float target_y
 );
+
+void fish_on_eat(Fish *fish);
 void fish_draw(const Fish *fish);
 
 #endif
