@@ -4,14 +4,14 @@
 #define MAX_BUBBLES 32
 
 typedef struct {
-    int x;
-    int y;
-    unsigned int age;
+    float x;
+    float y;
+    float age;
     int active;
 } Bubble;
 
-void bubbles_spawn(int x, int y);
-void bubbles_update(int rows, int cols);
+void bubbles_spawn(float x, float y);
+void bubbles_update(float dt, int rows, int cols);
 void bubbles_draw(void);
 
 #endif
