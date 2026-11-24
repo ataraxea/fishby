@@ -9,12 +9,14 @@ SRC = src/main.c \
       src/fish.c \
       src/bubbles.c \
       src/aquarium.c \
-      src/food.c
+      src/food.c \
+      src/pet.c
 
 HEADERS = include/fish.h \
           include/bubbles.h \
           include/aquarium.h \
-          include/food.h
+          include/food.h \
+          include/pet.h
 
 .PHONY: all clean
 

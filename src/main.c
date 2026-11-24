@@ -5,12 +5,12 @@
 #include <stdio.h>
 #include <time.h>
 #include <errno.h>
-#include <limits.h>
 
 #include "fish.h"
 #include "bubbles.h"
 #include "aquarium.h"
 #include "food.h"
+#include "pet.h"
 
 #define TARGET_FPS 60L
 #define FRAME_NS (1000000000L / TARGET_FPS)
@@ -48,6 +48,63 @@ static int wait_next_frame(struct timespec start)
     return result;
 }
 
+static void draw_status(const Pet *pet,
+                        int rows, int cols)
+{
+    char status[128];
+
+    if (cols >= 65) {
+        snprintf(
+            status,
+            sizeof(status),
+            "[F] Feed | [Q] Quit | Hunger: %d%%"
+            " | Mood: %s | Eaten: %lu",
+            (int)pet->hunger,
+            pet_mood_name(pet),
+            pet->eaten
+        );
+    } else {
+        snprintf(
+            status,
+            sizeof(status),
+            "F/Q | H:%d%% | %s | E:%lu",
+            (int)pet->hunger,
+            pet_mood_name(pet),
+            pet->eaten
+        );
+    }
+
+    mvaddnstr(
+        rows - 2,
+        2,
+        status,
+        cols - 3
+    );
+
+    /* Display fish thoughts in the top border */
+    if (cols >= 40) {
+        char thought[64];
+
+        snprintf(
+            thought,
+            sizeof(thought),
+            " %s ",
+            pet_thought(pet)
+        );
+
+        aquarium_color_on(AQUA_FISH);
+
+        mvaddnstr(
+            0,
+            12,
+            thought,
+            cols - 13
+        );
+
+        aquarium_color_off(AQUA_FISH);
+    }
+}
+
 int main(void)
 {
     if (initscr() == NULL)
@@ -66,6 +123,9 @@ int main(void)
     Fish fish;
     fish_init(&fish);
 
+    Pet pet;
+    pet_init(&pet);
+
     struct timespec previous;
     struct timespec current;
 
@@ -76,8 +136,6 @@ int main(void)
 
     float bubble_timer = 0.0f;
     float feed_cooldown = 0.0f;
-
-    unsigned long eaten = 0;
 
     int running = 1;
     int exit_status = EXIT_SUCCESS;
@@ -131,7 +189,8 @@ int main(void)
 
         erase();
 
-        /* Update particles */
+        /* Update pet state and particles */
+        pet_update(&pet, dt);
         bubbles_update(dt, rows, cols);
         food_update(dt, rows, cols);
 
@@ -140,7 +199,6 @@ int main(void)
             float target_x = 0.0f;
             float target_y = 0.0f;
 
-            /* Find the current food target */
             int has_target = food_nearest(
                 &fish,
                 &target_x,
@@ -158,7 +216,7 @@ int main(void)
                 target_y
             );
 
-            /* Consume food and recover */
+            /* Consume food and update pet state */
             unsigned int consumed = 0;
 
             if (fish.recovery_timer <= 0.0f)
@@ -166,11 +224,7 @@ int main(void)
 
             if (consumed > 0) {
                 fish_on_eat(&fish);
-
-                if (ULONG_MAX - eaten >= consumed)
-                    eaten += consumed;
-                else
-                    eaten = ULONG_MAX;
+                pet_feed(&pet, consumed);
             }
 
             /* Spawn bubbles */
@@ -193,37 +247,19 @@ int main(void)
             /* Draw aquarium */
             aquarium_draw(dt, rows, cols);
 
-            /* Draw bubbles */
             aquarium_color_on(AQUA_BUBBLE);
             bubbles_draw();
             aquarium_color_off(AQUA_BUBBLE);
 
-            /* Draw food */
             aquarium_color_on(AQUA_SAND);
             food_draw();
             aquarium_color_off(AQUA_SAND);
 
-            /* Draw fish */
             aquarium_color_on(AQUA_FISH);
             fish_draw(&fish);
             aquarium_color_off(AQUA_FISH);
 
-            /* Draw status bar */
-            char status[128];
-
-            snprintf(
-                status,
-                sizeof(status),
-                "[F] Feed | [Q] Quit | Eaten: %lu",
-                eaten
-            );
-
-            mvaddnstr(
-                rows - 2,
-                2,
-                status,
-                cols - 3
-            );
+            draw_status(&pet, rows, cols);
 
         } else {
             addnstr("Resize terminal", cols);
