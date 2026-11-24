@@ -27,7 +27,8 @@ SRC = src/main.c \
       src/food.c \
       src/pet.c \
       src/state.c \
-      src/cli.c
+      src/cli.c \
+      src/signals.c
 
 HEADERS = include/fish.h \
           include/bubbles.h \
@@ -35,7 +36,8 @@ HEADERS = include/fish.h \
           include/food.h \
           include/pet.h \
           include/state.h \
-          include/cli.h
+          include/cli.h \
+          include/signals.h
 
 .PHONY: all clean
 

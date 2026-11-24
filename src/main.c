@@ -15,6 +15,7 @@
 #include "pet.h"
 #include "state.h"
 #include "cli.h"
+#include "signals.h"
 
 #define MAX_DT 0.05f
 #define BUBBLE_INTERVAL 0.65f
@@ -45,13 +46,21 @@ static int wait_next_frame(
     int result;
 
     do {
+        if (signals_requested())
+            return 0;
+
         result = clock_nanosleep(
             CLOCK_MONOTONIC,
             TIMER_ABSTIME,
             &start,
             NULL
         );
-    } while (result == EINTR);
+
+    } while (result == EINTR &&
+             !signals_requested());
+
+    if (result == EINTR && signals_requested())
+        return 0;
 
     return result;
 }
@@ -89,11 +98,15 @@ static void draw_status(
 
     mvaddnstr(rows - 2, 2, status, cols - 3);
 
-    /* Draw the title and fish name */
+    /* Draw aquarium title */
     char title[64];
 
     if (strcmp(options->name, "fishby") == 0) {
-        snprintf(title, sizeof(title), " fishby ");
+        snprintf(
+            title,
+            sizeof(title),
+            " fishby "
+        );
     } else {
         snprintf(
             title,
@@ -104,9 +117,7 @@ static void draw_status(
     }
 
     aquarium_color_on(AQUA_BORDER);
-
     mvaddnstr(0, 2, title, cols - 3);
-
     aquarium_color_off(AQUA_BORDER);
 
     /* Draw fish thoughts */
@@ -165,10 +176,10 @@ int main(int argc, char **argv)
     Pet pet;
     pet_init(&pet);
 
-    /* Initialize persistent storage */
     int state_dir = -1;
     int save_error = 0;
 
+    /* Initialize persistent storage */
     if (!options.no_save) {
         state_dir = state_open();
 
@@ -184,6 +195,21 @@ int main(int argc, char **argv)
     if (initscr() == NULL) {
         if (state_dir >= 0)
             close(state_dir);
+
+        return EXIT_FAILURE;
+    }
+
+    /* Install handlers after ncurses initialization */
+    if (signals_init() < 0) {
+        endwin();
+
+        if (state_dir >= 0)
+            close(state_dir);
+
+        fprintf(
+            stderr,
+            "fishby: signal initialization failed\n"
+        );
 
         return EXIT_FAILURE;
     }
@@ -218,7 +244,7 @@ int main(int argc, char **argv)
     int running = 1;
     int exit_status = EXIT_SUCCESS;
 
-    while (running) {
+    while (running && !signals_requested()) {
         if (clock_gettime(CLOCK_MONOTONIC, &current) != 0) {
             exit_status = EXIT_FAILURE;
             break;
@@ -239,8 +265,11 @@ int main(int argc, char **argv)
         if (feed_cooldown > 0.0f)
             feed_cooldown -= dt;
 
-        /* Process input */
+        /* Process keyboard input */
         for (int i = 0; i < 32; i++) {
+            if (signals_requested())
+                break;
+
             int ch = getch();
 
             if (ch == ERR)
@@ -260,7 +289,7 @@ int main(int argc, char **argv)
             }
         }
 
-        if (!running)
+        if (!running || signals_requested())
             break;
 
         getmaxyx(stdscr, rows, cols);
@@ -348,6 +377,9 @@ int main(int argc, char **argv)
             addnstr("Resize terminal", cols);
         }
 
+        if (signals_requested())
+            break;
+
         /* Present frame */
         wnoutrefresh(stdscr);
         doupdate();
@@ -372,9 +404,10 @@ int main(int argc, char **argv)
         }
     }
 
+    /* Restore terminal state */
     endwin();
 
-    /* Save state before exiting */
+    /* Save pet state outside the signal handler */
     if (state_dir >= 0) {
         save_error = state_save(
             state_dir, &pet
@@ -388,6 +421,12 @@ int main(int argc, char **argv)
 
     if (exit_status != EXIT_SUCCESS)
         fprintf(stderr, "fishby: animation timer failed\n");
+
+    /* Return conventional signal exit status */
+    int signo = signals_received();
+
+    if (signo != 0)
+        return 128 + signo;
 
     return exit_status;
 }
