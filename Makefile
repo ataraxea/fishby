@@ -1,7 +1,22 @@
 CC = cc
-CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O2
+
 CPPFLAGS = -Iinclude
+CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O2
+LDFLAGS =
 LDLIBS = -lncurses -lm
+
+HARDEN_CPPFLAGS = -D_FORTIFY_SOURCE=3
+
+HARDEN_CFLAGS = -fstack-protector-strong \
+                -fstack-clash-protection \
+                -fPIE \
+                -Wformat=2 \
+                -Werror=format-security
+
+HARDEN_LDFLAGS = -pie \
+                 -Wl,-z,relro \
+                 -Wl,-z,now \
+                 -Wl,-z,noexecstack
 
 TARGET = fishby
 
@@ -26,8 +41,11 @@ HEADERS = include/fish.h \
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) $(HEADERS)
-	$(CC) $(CPPFLAGS) $(CFLAGS) $(SRC) -o $(TARGET) $(LDLIBS)
+$(TARGET): $(SRC) $(HEADERS) Makefile
+	$(CC) $(CPPFLAGS) $(HARDEN_CPPFLAGS) \
+		$(CFLAGS) $(HARDEN_CFLAGS) \
+		$(SRC) -o $(TARGET) \
+		$(LDFLAGS) $(HARDEN_LDFLAGS) $(LDLIBS)
 
 clean:
 	rm -f $(TARGET)
