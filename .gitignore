@@ -3,3 +3,7 @@
 *.core
 core
 /fishby-san
+
+/tests/test_pet
+
+/tests/test_state

@@ -52,6 +52,9 @@ LINT_FLAGS = --enable=warning,style,performance,portability \
 TARGET = fishby
 SAN_TARGET = fishby-san
 
+TEST_PET = tests/test_pet
+TEST_STATE = tests/test_state
+
 SRC = src/main.c \
       src/fish.c \
       src/bubbles.c \
@@ -71,7 +74,7 @@ HEADERS = include/fish.h \
           include/cli.h \
           include/signals.h
 
-.PHONY: all sanitize analyze lint check clean
+.PHONY: all sanitize analyze lint test check clean
 
 all: $(TARGET)
 
@@ -94,7 +97,26 @@ analyze:
 lint:
 	$(CPPCHECK) $(CPPFLAGS) $(LINT_FLAGS) $(SRC)
 
-check: all sanitize analyze lint
+$(TEST_PET): tests/test_pet.c src/pet.c include/pet.h Makefile
+	$(CC) $(CPPFLAGS) $(SAN_CFLAGS) \
+		-UNDEBUG \
+		tests/test_pet.c src/pet.c \
+		-o $(TEST_PET) $(SAN_LDFLAGS) -lm
+
+$(TEST_STATE): tests/test_state.c src/state.c src/pet.c \
+               include/state.h include/pet.h Makefile
+	$(CC) $(CPPFLAGS) $(SAN_CFLAGS) \
+		-UNDEBUG \
+		tests/test_state.c src/state.c src/pet.c \
+		-o $(TEST_STATE) $(SAN_LDFLAGS) -lm
+
+test: $(TARGET) $(SAN_TARGET) $(TEST_PET) $(TEST_STATE)
+	./$(TEST_PET)
+	./$(TEST_STATE)
+	bash tests/test_cli.sh ./$(TARGET)
+	bash tests/test_cli.sh ./$(SAN_TARGET)
+
+check: all sanitize analyze lint test
 
 clean:
-	rm -f $(TARGET) $(SAN_TARGET)
+	rm -f $(TARGET) $(SAN_TARGET) $(TEST_PET) $(TEST_STATE)
