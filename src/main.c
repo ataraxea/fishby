@@ -17,18 +17,39 @@
 #include "cli.h"
 #include "signals.h"
 
-#define MAX_DT 0.05f
+#define SIMULATION_HZ 60.0
+#define SIMULATION_DT (1.0 / SIMULATION_HZ)
+
+#define MAX_FRAME_TIME 0.25
+#define MAX_SIMULATION_STEPS 16
+
 #define BUBBLE_INTERVAL 0.65f
 #define FEED_COOLDOWN 0.3f
-#define SAVE_INTERVAL 30.0f
+#define SAVE_INTERVAL 30.0
+#define FPS_SAMPLE_INTERVAL 1.0
 
-static float elapsed(
+typedef struct {
+    Fish fish;
+    Pet pet;
+
+    float bubble_timer;
+    float feed_cooldown;
+} Simulation;
+
+typedef struct {
+    double elapsed;
+    unsigned int frames;
+    double measured;
+} FpsCounter;
+
+static double elapsed(
     struct timespec start,
     struct timespec end
 )
 {
-    return (float)(end.tv_sec - start.tv_sec)
-        + (float)(end.tv_nsec - start.tv_nsec) / 1e9f;
+    return (double)(end.tv_sec - start.tv_sec)
+        + (double)(end.tv_nsec - start.tv_nsec)
+        / 1000000000.0;
 }
 
 static int wait_next_frame(
@@ -65,9 +86,100 @@ static int wait_next_frame(
     return result;
 }
 
+static void fps_update(
+    FpsCounter *counter,
+    double dt
+)
+{
+    counter->elapsed += dt;
+
+    if (counter->elapsed >= FPS_SAMPLE_INTERVAL) {
+        counter->measured =
+            (double)counter->frames /
+            counter->elapsed;
+
+        counter->frames = 0;
+        counter->elapsed = 0.0;
+    }
+}
+
+static void simulation_init(Simulation *sim)
+{
+    *sim = (Simulation){0};
+
+    fish_init(&sim->fish);
+    pet_init(&sim->pet);
+}
+
+static void simulation_update(
+    Simulation *sim,
+    float dt,
+    int rows,
+    int cols
+)
+{
+    if (sim->feed_cooldown > 0.0f)
+        sim->feed_cooldown -= dt;
+
+    pet_update(&sim->pet, dt);
+    bubbles_update(dt, rows, cols);
+    food_update(dt, rows, cols);
+
+    if (rows < 7 || cols < 20)
+        return;
+
+    float target_x = 0.0f;
+    float target_y = 0.0f;
+
+    int has_target = food_nearest(
+        &sim->fish,
+        &target_x,
+        &target_y
+    );
+
+    fish_update(
+        &sim->fish,
+        dt,
+        rows,
+        cols,
+        has_target,
+        target_x,
+        target_y
+    );
+
+    /* Consume food */
+    unsigned int consumed = 0;
+
+    if (sim->fish.recovery_timer <= 0.0f)
+        consumed = food_eat(&sim->fish);
+
+    if (consumed > 0) {
+        fish_on_eat(&sim->fish);
+        pet_feed(&sim->pet, consumed);
+    }
+
+    /* Spawn bubbles at a fixed simulation rate */
+    sim->bubble_timer += dt;
+
+    if (sim->bubble_timer >= BUBBLE_INTERVAL) {
+        float mouth_x = sim->fish.x;
+
+        if (sim->fish.direction > 0)
+            mouth_x += FISH_WIDTH - 1;
+
+        bubbles_spawn(
+            mouth_x,
+            sim->fish.y - 1.0f
+        );
+
+        sim->bubble_timer -= BUBBLE_INTERVAL;
+    }
+}
+
 static void draw_status(
     const Pet *pet,
     const CliOptions *options,
+    const FpsCounter *fps,
     int rows,
     int cols,
     int save_error
@@ -75,21 +187,27 @@ static void draw_status(
 {
     char status[192];
 
-    if (cols >= 65) {
+    if (cols >= 90) {
         snprintf(
             status,
             sizeof(status),
             "[F] Feed | [Q] Quit | Hunger: %d%%"
-            " | Mood: %s | Eaten: %lu",
+            " | Mood: %s | Eaten: %lu"
+            " | FPS: %.0f/%d",
             (int)pet->hunger,
             pet_mood_name(pet),
-            pet->eaten
+            pet->eaten,
+            fps->measured,
+            options->fps
         );
     } else {
         snprintf(
             status,
             sizeof(status),
-            "F/Q | H:%d%% | %s | E:%lu",
+            "FPS: %.0f/%d | F/Q | H:%d%%"
+            " | %s | E:%lu",
+            fps->measured,
+            options->fps,
             (int)pet->hunger,
             pet_mood_name(pet),
             pet->eaten
@@ -153,12 +271,85 @@ static void draw_status(
     }
 }
 
+static void render_frame(
+    const Simulation *sim,
+    const CliOptions *options,
+    const FpsCounter *fps,
+    float visual_dt,
+    int rows,
+    int cols,
+    int save_error
+)
+{
+    erase();
+
+    if (rows < 7 || cols < 20) {
+        addnstr("Resize terminal", cols);
+        return;
+    }
+
+    aquarium_draw(visual_dt, rows, cols);
+
+    aquarium_color_on(AQUA_BUBBLE);
+    bubbles_draw();
+    aquarium_color_off(AQUA_BUBBLE);
+
+    aquarium_color_on(AQUA_SAND);
+    food_draw();
+    aquarium_color_off(AQUA_SAND);
+
+    aquarium_color_on(AQUA_FISH);
+    fish_draw(&sim->fish);
+    aquarium_color_off(AQUA_FISH);
+
+    draw_status(
+        &sim->pet,
+        options,
+        fps,
+        rows,
+        cols,
+        save_error
+    );
+}
+
+static int process_input(
+    Simulation *sim,
+    int rows,
+    int cols
+)
+{
+    for (int i = 0; i < 32; i++) {
+        if (signals_requested())
+            return 0;
+
+        int ch = getch();
+
+        if (ch == ERR)
+            break;
+
+        if (ch == 'q' || ch == 'Q')
+            return 0;
+
+        if ((ch == 'f' || ch == 'F') &&
+            sim->feed_cooldown <= 0.0f &&
+            rows >= 7 && cols >= 20) {
+
+            food_spawn(rows, cols);
+            sim->feed_cooldown = FEED_COOLDOWN;
+        }
+    }
+
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     CliOptions options;
 
     CliResult result = cli_parse(
-        &options, argc, argv
+        &options,
+        argc,
+        argv
     );
 
     if (result == CLI_EXIT)
@@ -170,11 +361,10 @@ int main(int argc, char **argv)
     const long frame_ns =
         1000000000L / options.fps;
 
-    Fish fish;
-    fish_init(&fish);
+    Simulation sim;
+    simulation_init(&sim);
 
-    Pet pet;
-    pet_init(&pet);
+    FpsCounter fps = {0};
 
     int state_dir = -1;
     int save_error = 0;
@@ -185,7 +375,12 @@ int main(int argc, char **argv)
 
         if (state_dir < 0) {
             save_error = 1;
-        } else if (state_load(state_dir, &pet) < 0) {
+
+        } else if (state_load(
+                       state_dir,
+                       &sim.pet
+                   ) < 0) {
+
             close(state_dir);
             state_dir = -1;
             save_error = 1;
@@ -228,7 +423,11 @@ int main(int argc, char **argv)
     struct timespec previous;
     struct timespec current;
 
-    if (clock_gettime(CLOCK_MONOTONIC, &previous) != 0) {
+    if (clock_gettime(
+            CLOCK_MONOTONIC,
+            &previous
+        ) != 0) {
+
         endwin();
 
         if (state_dir >= 0)
@@ -237,168 +436,118 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    float bubble_timer = 0.0f;
-    float feed_cooldown = 0.0f;
-    float save_timer = 0.0f;
+    double accumulator = 0.0;
+    double save_timer = 0.0;
 
-    int running = 1;
     int exit_status = EXIT_SUCCESS;
 
-    while (running && !signals_requested()) {
-        if (clock_gettime(CLOCK_MONOTONIC, &current) != 0) {
+    while (!signals_requested()) {
+
+        if (clock_gettime(
+                CLOCK_MONOTONIC,
+                &current
+            ) != 0) {
+
             exit_status = EXIT_FAILURE;
             break;
         }
 
-        float dt = elapsed(previous, current);
+        double real_dt = elapsed(
+            previous,
+            current
+        );
+
         previous = current;
 
-        if (dt > MAX_DT)
-            dt = MAX_DT;
+        if (real_dt < 0.0)
+            real_dt = 0.0;
 
-        if (dt < 0.0f)
-            dt = 0.0f;
+        /* Measure actual rendered frames */
+        fps_update(&fps, real_dt);
+
+        /* Autosave uses real elapsed time */
+        save_timer += real_dt;
+
+        /* Bound simulation catch-up time */
+        double frame_dt = real_dt;
+
+        if (frame_dt > MAX_FRAME_TIME)
+            frame_dt = MAX_FRAME_TIME;
+
+        accumulator += frame_dt;
 
         int rows, cols;
         getmaxyx(stdscr, rows, cols);
 
-        if (feed_cooldown > 0.0f)
-            feed_cooldown -= dt;
-
-        /* Process keyboard input */
-        for (int i = 0; i < 32; i++) {
-            if (signals_requested())
-                break;
-
-            int ch = getch();
-
-            if (ch == ERR)
-                break;
-
-            if (ch == 'q' || ch == 'Q') {
-                running = 0;
-                break;
-            }
-
-            if ((ch == 'f' || ch == 'F') &&
-                feed_cooldown <= 0.0f &&
-                rows >= 7 && cols >= 20) {
-
-                food_spawn(rows, cols);
-                feed_cooldown = FEED_COOLDOWN;
-            }
-        }
-
-        if (!running || signals_requested())
+        if (!process_input(&sim, rows, cols))
             break;
 
         getmaxyx(stdscr, rows, cols);
 
-        erase();
+        /* Fixed-step simulation */
+        int steps = 0;
+        double simulated_time = 0.0;
 
-        /* Update pet state and particles */
-        pet_update(&pet, dt);
-        bubbles_update(dt, rows, cols);
-        food_update(dt, rows, cols);
+        while (accumulator >= SIMULATION_DT &&
+               steps < MAX_SIMULATION_STEPS &&
+               !signals_requested()) {
 
-        if (rows >= 7 && cols >= 20) {
-            float target_x = 0.0f;
-            float target_y = 0.0f;
-
-            int has_target = food_nearest(
-                &fish,
-                &target_x,
-                &target_y
-            );
-
-            /* Update fish movement */
-            fish_update(
-                &fish,
-                dt,
+            simulation_update(
+                &sim,
+                (float)SIMULATION_DT,
                 rows,
-                cols,
-                has_target,
-                target_x,
-                target_y
+                cols
             );
 
-            /* Consume food */
-            unsigned int consumed = 0;
+            accumulator -= SIMULATION_DT;
+            simulated_time += SIMULATION_DT;
 
-            if (fish.recovery_timer <= 0.0f)
-                consumed = food_eat(&fish);
-
-            if (consumed > 0) {
-                fish_on_eat(&fish);
-                pet_feed(&pet, consumed);
-            }
-
-            /* Spawn bubbles */
-            bubble_timer += dt;
-
-            if (bubble_timer >= BUBBLE_INTERVAL) {
-                float mouth_x = fish.x;
-
-                if (fish.direction > 0)
-                    mouth_x += FISH_WIDTH - 1;
-
-                bubbles_spawn(
-                    mouth_x,
-                    fish.y - 1.0f
-                );
-
-                bubble_timer -= BUBBLE_INTERVAL;
-            }
-
-            /* Draw aquarium */
-            aquarium_draw(dt, rows, cols);
-
-            aquarium_color_on(AQUA_BUBBLE);
-            bubbles_draw();
-            aquarium_color_off(AQUA_BUBBLE);
-
-            aquarium_color_on(AQUA_SAND);
-            food_draw();
-            aquarium_color_off(AQUA_SAND);
-
-            aquarium_color_on(AQUA_FISH);
-            fish_draw(&fish);
-            aquarium_color_off(AQUA_FISH);
-
-            draw_status(
-                &pet,
-                &options,
-                rows,
-                cols,
-                save_error
-            );
-
-        } else {
-            addnstr("Resize terminal", cols);
+            steps++;
         }
+
+        /* Prevent unbounded simulation backlog */
+        if (accumulator >= SIMULATION_DT)
+            accumulator = 0.0;
 
         if (signals_requested())
             break;
 
-        /* Present frame */
-        wnoutrefresh(stdscr);
-        doupdate();
+        /* Render once per outer loop */
+        render_frame(
+            &sim,
+            &options,
+            &fps,
+            (float)simulated_time,
+            rows,
+            cols,
+            save_error
+        );
 
-        /* Periodic autosave */
-        if (state_dir >= 0) {
-            save_timer += dt;
+        /* Present the completed frame */
+        if (wnoutrefresh(stdscr) != ERR &&
+            doupdate() != ERR) {
 
-            if (save_timer >= SAVE_INTERVAL) {
-                save_error = state_save(
-                    state_dir, &pet
-                ) < 0;
-
-                save_timer = 0.0f;
-            }
+            fps.frames++;
         }
 
-        /* Limit frame rate */
-        if (wait_next_frame(current, frame_ns) != 0) {
+        /* Periodic autosave */
+        if (state_dir >= 0 &&
+            save_timer >= SAVE_INTERVAL) {
+
+            save_error = state_save(
+                state_dir,
+                &sim.pet
+            ) < 0;
+
+            save_timer = 0.0;
+        }
+
+        /* Limit rendering frame rate */
+        if (wait_next_frame(
+                current,
+                frame_ns
+            ) != 0) {
+
             exit_status = EXIT_FAILURE;
             break;
         }
@@ -407,22 +556,28 @@ int main(int argc, char **argv)
     /* Restore terminal state */
     endwin();
 
-    /* Save pet state outside the signal handler */
+    /* Save pet state before exiting */
     if (state_dir >= 0) {
         save_error = state_save(
-            state_dir, &pet
+            state_dir,
+            &sim.pet
         ) < 0;
 
         close(state_dir);
     }
 
     if (save_error)
-        fprintf(stderr, "fishby: state unavailable\n");
+        fprintf(
+            stderr,
+            "fishby: state unavailable\n"
+        );
 
     if (exit_status != EXIT_SUCCESS)
-        fprintf(stderr, "fishby: animation timer failed\n");
+        fprintf(
+            stderr,
+            "fishby: animation timer failed\n"
+        );
 
-    /* Return conventional signal exit status */
     int signo = signals_received();
 
     if (signo != 0)
