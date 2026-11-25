@@ -2,6 +2,18 @@
 
 #include "platform_terminal.h"
 
+#ifdef _WIN32
+
+static void terminal_sync_size(void)
+{
+    if (is_termresized()) {
+        if (resize_term(0, 0) == OK)
+            clearok(stdscr, TRUE);
+    }
+}
+
+#endif
+
 int terminal_init(void)
 {
     if (initscr() == NULL)
@@ -19,6 +31,10 @@ int terminal_init(void)
     /* Cursor visibility is not supported everywhere */
     curs_set(0);
 
+#ifdef _WIN32
+    terminal_sync_size();
+#endif
+
     return 0;
 }
 
@@ -29,6 +45,10 @@ void terminal_shutdown(void)
 
 void terminal_size(int *rows, int *cols)
 {
+#ifdef _WIN32
+    terminal_sync_size();
+#endif
+
     int height, width;
 
     getmaxyx(stdscr, height, width);
@@ -39,7 +59,16 @@ void terminal_size(int *rows, int *cols)
 
 int terminal_read_key(void)
 {
-    return getch();
+    int ch = getch();
+
+#ifdef _WIN32
+    if (ch == KEY_RESIZE) {
+        if (resize_term(0, 0) == OK)
+            clearok(stdscr, TRUE);
+    }
+#endif
+
+    return ch;
 }
 
 int terminal_present(void)

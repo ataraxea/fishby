@@ -8,8 +8,24 @@
 static int colors_enabled = 0;
 static float phase = 0.0f;
 
+#ifdef _WIN32
+static int bold_colors = 0;
+#endif
+
+static short foreground_color(short color)
+{
+#ifdef _WIN32
+    if (COLORS >= 16 && color >= 0 && color < 8)
+        return (short)(color + 8);
+#endif
+
+    return color;
+}
+
 void aquarium_init(void)
 {
+    colors_enabled = 0;
+
     if (!has_colors())
         return;
 
@@ -21,30 +37,80 @@ void aquarium_init(void)
 
     short background = COLOR_BLACK;
 
+#ifdef _WIN32
+    /* Use a consistent dark console background */
+    bold_colors = COLORS < 16;
+#else
     if (use_default_colors() == OK)
         background = -1;
+#endif
 
-    if (init_pair(AQUA_WATER, COLOR_BLUE, background) == ERR ||
-        init_pair(AQUA_FISH, COLOR_YELLOW, background) == ERR ||
-        init_pair(AQUA_BUBBLE, COLOR_CYAN, background) == ERR ||
-        init_pair(AQUA_PLANT, COLOR_GREEN, background) == ERR ||
-        init_pair(AQUA_SAND, COLOR_YELLOW, background) == ERR ||
-        init_pair(AQUA_BORDER, COLOR_WHITE, background) == ERR)
+    if (init_pair(
+            AQUA_WATER,
+            foreground_color(COLOR_BLUE),
+            background
+        ) == ERR ||
+
+        init_pair(
+            AQUA_FISH,
+            foreground_color(COLOR_YELLOW),
+            background
+        ) == ERR ||
+
+        init_pair(
+            AQUA_BUBBLE,
+            foreground_color(COLOR_CYAN),
+            background
+        ) == ERR ||
+
+        init_pair(
+            AQUA_PLANT,
+            foreground_color(COLOR_GREEN),
+            background
+        ) == ERR ||
+
+        init_pair(
+            AQUA_SAND,
+            foreground_color(COLOR_YELLOW),
+            background
+        ) == ERR ||
+
+        init_pair(
+            AQUA_BORDER,
+            foreground_color(COLOR_WHITE),
+            background
+        ) == ERR) {
+
         return;
+    }
 
     colors_enabled = 1;
 }
 
 void aquarium_color_on(AquariumColor color)
 {
-    if (colors_enabled)
-        attron(COLOR_PAIR(color));
+    if (!colors_enabled)
+        return;
+
+    attron(COLOR_PAIR(color));
+
+#ifdef _WIN32
+    if (bold_colors)
+        attron(A_BOLD);
+#endif
 }
 
 void aquarium_color_off(AquariumColor color)
 {
-    if (colors_enabled)
-        attroff(COLOR_PAIR(color));
+    if (!colors_enabled)
+        return;
+
+    attroff(COLOR_PAIR(color));
+
+#ifdef _WIN32
+    if (bold_colors)
+        attroff(A_BOLD);
+#endif
 }
 
 static void draw_water(int cols)
