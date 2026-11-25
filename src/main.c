@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-#include <errno.h>
 #include <unistd.h>
 #include <string.h>
 
@@ -16,6 +15,7 @@
 #include "state.h"
 #include "cli.h"
 #include "signals.h"
+#include "platform_time.h"
 
 #define SIMULATION_HZ 60.0
 #define SIMULATION_DT (1.0 / SIMULATION_HZ)
@@ -42,48 +42,21 @@ typedef struct {
     double measured;
 } FpsCounter;
 
-static double elapsed(
-    struct timespec start,
-    struct timespec end
-)
-{
-    return (double)(end.tv_sec - start.tv_sec)
-        + (double)(end.tv_nsec - start.tv_nsec)
-        / 1000000000.0;
-}
-
 static int wait_next_frame(
-    struct timespec start,
-    long frame_ns
+    double start,
+    double frame_duration
 )
 {
-    start.tv_nsec += frame_ns;
+    double deadline = start + frame_duration;
 
-    if (start.tv_nsec >= 1000000000L) {
-        start.tv_sec++;
-        start.tv_nsec -= 1000000000L;
+    while (!signals_requested()) {
+        int result = platform_sleep_until(deadline);
+
+        if (result <= 0)
+            return result;
     }
 
-    int result;
-
-    do {
-        if (signals_requested())
-            return 0;
-
-        result = clock_nanosleep(
-            CLOCK_MONOTONIC,
-            TIMER_ABSTIME,
-            &start,
-            NULL
-        );
-
-    } while (result == EINTR &&
-             !signals_requested());
-
-    if (result == EINTR && signals_requested())
-        return 0;
-
-    return result;
+    return 0;
 }
 
 static void fps_update(
@@ -358,8 +331,8 @@ int main(int argc, char **argv)
     if (result == CLI_ERROR)
         return EXIT_FAILURE;
 
-    const long frame_ns =
-        1000000000L / options.fps;
+    const double frame_duration =
+        1.0 / options.fps;
 
     Simulation sim;
     simulation_init(&sim);
@@ -420,13 +393,10 @@ int main(int argc, char **argv)
 
     srand((unsigned int)time(NULL));
 
-    struct timespec previous;
-    struct timespec current;
+    double previous;
+    double current;
 
-    if (clock_gettime(
-            CLOCK_MONOTONIC,
-            &previous
-        ) != 0) {
+    if (platform_time_now(&previous) != 0) {
 
         endwin();
 
@@ -443,19 +413,13 @@ int main(int argc, char **argv)
 
     while (!signals_requested()) {
 
-        if (clock_gettime(
-                CLOCK_MONOTONIC,
-                &current
-            ) != 0) {
+        if (platform_time_now(&current) != 0) {
 
             exit_status = EXIT_FAILURE;
             break;
         }
 
-        double real_dt = elapsed(
-            previous,
-            current
-        );
+        double real_dt = current - previous;
 
         previous = current;
 
@@ -545,7 +509,7 @@ int main(int argc, char **argv)
         /* Limit rendering frame rate */
         if (wait_next_frame(
                 current,
-                frame_ns
+                frame_duration
             ) != 0) {
 
             exit_status = EXIT_FAILURE;
