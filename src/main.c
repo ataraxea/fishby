@@ -4,7 +4,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
-#include <unistd.h>
 #include <string.h>
 
 #include "fish.h"
@@ -354,7 +353,7 @@ int main(int argc, char **argv)
                        &sim.pet
                    ) < 0) {
 
-            close(state_dir);
+            state_close(state_dir);
             state_dir = -1;
             save_error = 1;
         }
@@ -362,7 +361,7 @@ int main(int argc, char **argv)
 
     if (terminal_init() < 0) {
         if (state_dir >= 0)
-            close(state_dir);
+            state_close(state_dir);
 
         return EXIT_FAILURE;
     }
@@ -372,7 +371,7 @@ int main(int argc, char **argv)
         terminal_shutdown();
 
         if (state_dir >= 0)
-            close(state_dir);
+            state_close(state_dir);
 
         fprintf(
             stderr,
@@ -395,7 +394,7 @@ int main(int argc, char **argv)
         terminal_shutdown();
 
         if (state_dir >= 0)
-            close(state_dir);
+            state_close(state_dir);
 
         return EXIT_FAILURE;
     }
@@ -520,7 +519,7 @@ int main(int argc, char **argv)
             &sim.pet
         ) < 0;
 
-        close(state_dir);
+        state_close(state_dir);
     }
 
     if (save_error)

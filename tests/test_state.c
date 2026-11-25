@@ -202,7 +202,7 @@ int main(int argc, char **argv)
         int dir = state_open();
 
         if (dir >= 0) {
-            close(dir);
+            state_close(dir);
             return EXIT_FAILURE;
         }
 
@@ -236,6 +236,21 @@ int main(int argc, char **argv)
     test_state_symlink(dir);
     test_concurrent_lock(argv[0]);
 
+    /* Verify explicit storage session cleanup */
+    state_close(dir);
+
+    assert(state_load(dir, &pet) < 0);
+    assert(state_save(dir, &pet) < 0);
+
+    /* Storage must be available again */
+    dir = state_open();
+
+    assert(dir >= 0);
+
+    puts("PASS: storage session reopened");
+
+    test_concurrent_lock(argv[0]);
+
     assert(state_save(dir, &pet) == 0);
 
     assert(unlinkat(dir, "pet.state", 0) == 0);
@@ -245,7 +260,7 @@ int main(int argc, char **argv)
      * Remove the lock only during fixture cleanup.
      */
     assert(unlinkat(dir, "pet.lock", 0) == 0);
-    assert(close(dir) == 0);
+    state_close(dir);
 
     char path[256];
 

@@ -15,8 +15,9 @@
 #define STATE_FILE "pet.state"
 #define LOCK_FILE "pet.lock"
 
-/* Keep the lock for the entire process lifetime */
+/* Active storage session */
 static int lock_fd = -1;
+static int active_dir = -1;
 
 static int make_parents(char *path)
 {
@@ -162,7 +163,25 @@ int state_open(void)
         return -1;
     }
 
+    active_dir = fd;
+
     return fd;
+}
+
+void state_close(int dir)
+{
+    if (dir < 0 || dir != active_dir)
+        return;
+
+    /* Close storage while the lock is still held */
+    close(active_dir);
+    active_dir = -1;
+
+    /* Closing the descriptor releases the lock */
+    if (lock_fd >= 0) {
+        close(lock_fd);
+        lock_fd = -1;
+    }
 }
 
 static int parse_number(
@@ -190,7 +209,10 @@ static int parse_number(
 
 int state_load(int dir, Pet *pet)
 {
-    if (lock_fd < 0) {
+    if (lock_fd < 0 ||
+        dir < 0 ||
+        dir != active_dir) {
+
         errno = EPERM;
         return -1;
     }
@@ -279,7 +301,10 @@ fail:
 
 int state_save(int dir, const Pet *pet)
 {
-    if (lock_fd < 0) {
+    if (lock_fd < 0 ||
+        dir < 0 ||
+        dir != active_dir) {
+
         errno = EPERM;
         return -1;
     }
