@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
@@ -12,6 +13,10 @@
 #include "state.h"
 
 #define STATE_FILE "pet.state"
+#define LOCK_FILE "pet.lock"
+
+/* Keep the lock for the entire process lifetime */
+static int lock_fd = -1;
 
 static int make_parents(char *path)
 {
@@ -32,6 +37,66 @@ static int make_parents(char *path)
     return 0;
 }
 
+static int acquire_lock(int dir)
+{
+    if (lock_fd >= 0) {
+        errno = EALREADY;
+        return -1;
+    }
+
+    int fd = openat(
+        dir,
+        LOCK_FILE,
+        O_RDWR | O_CREAT |
+        O_NOFOLLOW | O_NONBLOCK |
+        O_CLOEXEC,
+        0600
+    );
+
+    if (fd < 0)
+        return -1;
+
+    struct stat st;
+
+    /* Validate lock file metadata */
+    if (fstat(fd, &st) < 0) {
+        int error = errno;
+        close(fd);
+        errno = error;
+        return -1;
+    }
+
+    if (!S_ISREG(st.st_mode) ||
+        st.st_uid != geteuid() ||
+        (st.st_mode & 0777) != 0600 ||
+        st.st_nlink != 1) {
+
+        close(fd);
+        errno = EPERM;
+        return -1;
+    }
+
+    /* Never wait for another instance */
+    int rc;
+
+    do {
+        rc = flock(fd, LOCK_EX | LOCK_NB);
+    } while (rc < 0 && errno == EINTR);
+
+    if (rc < 0) {
+        int error = errno;
+
+        close(fd);
+        errno = error;
+
+        return -1;
+    }
+
+    lock_fd = fd;
+
+    return 0;
+}
+
 int state_open(void)
 {
     const char *base = getenv("XDG_DATA_HOME");
@@ -42,17 +107,25 @@ int state_open(void)
         suffix = "/.local/share/fishby";
     }
 
-    if (!base || base[0] != '/')
+    if (!base || base[0] != '/') {
+        errno = EINVAL;
         return -1;
+    }
 
     char path[4096];
 
     int n = snprintf(
-        path, sizeof(path), "%s%s", base, suffix
+        path,
+        sizeof(path),
+        "%s%s",
+        base,
+        suffix
     );
 
-    if (n < 0 || (size_t)n >= sizeof(path))
+    if (n < 0 || (size_t)n >= sizeof(path)) {
+        errno = ENAMETOOLONG;
         return -1;
+    }
 
     if (make_parents(path) < 0)
         return -1;
@@ -79,10 +152,23 @@ int state_open(void)
         return -1;
     }
 
+    /* Lock storage before loading pet state */
+    if (acquire_lock(fd) < 0) {
+        int error = errno;
+
+        close(fd);
+        errno = error;
+
+        return -1;
+    }
+
     return fd;
 }
 
-static int parse_number(char **p, unsigned long *value)
+static int parse_number(
+    char **p,
+    unsigned long *value
+)
 {
     if (**p < '0' || **p > '9')
         return -1;
@@ -104,6 +190,11 @@ static int parse_number(char **p, unsigned long *value)
 
 int state_load(int dir, Pet *pet)
 {
+    if (lock_fd < 0) {
+        errno = EPERM;
+        return -1;
+    }
+
     int fd = openat(
         dir,
         STATE_FILE,
@@ -159,6 +250,7 @@ int state_load(int dir, Pet *pet)
         goto fail;
 
     char *p = buf + 8;
+
     unsigned long hunger;
     unsigned long eaten;
 
@@ -187,6 +279,11 @@ fail:
 
 int state_save(int dir, const Pet *pet)
 {
+    if (lock_fd < 0) {
+        errno = EPERM;
+        return -1;
+    }
+
     if (!isfinite(pet->hunger) ||
         pet->hunger < 0 ||
         pet->hunger > 100) {
@@ -271,7 +368,9 @@ int state_save(int dir, const Pet *pet)
         ok = 0;
 
     /* Atomically replace the previous state */
-    if (!ok || renameat(dir, tmp, dir, STATE_FILE) < 0) {
+    if (!ok ||
+        renameat(dir, tmp, dir, STATE_FILE) < 0) {
+
         unlinkat(dir, tmp, 0);
         return -1;
     }
