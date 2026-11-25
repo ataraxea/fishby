@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include <ncurses.h>
+#include "platform_terminal.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
@@ -254,7 +254,7 @@ static void render_frame(
     int save_error
 )
 {
-    erase();
+    terminal_clear();
 
     if (rows < 7 || cols < 20) {
         addnstr("Resize terminal", cols);
@@ -295,7 +295,7 @@ static int process_input(
         if (signals_requested())
             return 0;
 
-        int ch = getch();
+        int ch = terminal_read_key();
 
         if (ch == ERR)
             break;
@@ -360,7 +360,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (initscr() == NULL) {
+    if (terminal_init() < 0) {
         if (state_dir >= 0)
             close(state_dir);
 
@@ -369,7 +369,7 @@ int main(int argc, char **argv)
 
     /* Install handlers after ncurses initialization */
     if (signals_init() < 0) {
-        endwin();
+        terminal_shutdown();
 
         if (state_dir >= 0)
             close(state_dir);
@@ -382,12 +382,6 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    cbreak();
-    noecho();
-    curs_set(0);
-    keypad(stdscr, TRUE);
-    nodelay(stdscr, TRUE);
-
     if (!options.no_color)
         aquarium_init();
 
@@ -398,7 +392,7 @@ int main(int argc, char **argv)
 
     if (platform_time_now(&previous) != 0) {
 
-        endwin();
+        terminal_shutdown();
 
         if (state_dir >= 0)
             close(state_dir);
@@ -441,12 +435,12 @@ int main(int argc, char **argv)
         accumulator += frame_dt;
 
         int rows, cols;
-        getmaxyx(stdscr, rows, cols);
+        terminal_size(&rows, &cols);
 
         if (!process_input(&sim, rows, cols))
             break;
 
-        getmaxyx(stdscr, rows, cols);
+        terminal_size(&rows, &cols);
 
         /* Fixed-step simulation */
         int steps = 0;
@@ -488,8 +482,7 @@ int main(int argc, char **argv)
         );
 
         /* Present the completed frame */
-        if (wnoutrefresh(stdscr) != ERR &&
-            doupdate() != ERR) {
+        if (terminal_present() == 0) {
 
             fps.frames++;
         }
@@ -518,7 +511,7 @@ int main(int argc, char **argv)
     }
 
     /* Restore terminal state */
-    endwin();
+    terminal_shutdown();
 
     /* Save pet state before exiting */
     if (state_dir >= 0) {

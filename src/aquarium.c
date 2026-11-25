@@ -1,4 +1,4 @@
-#include <ncurses.h>
+#include "platform_terminal.h"
 #include <math.h>
 
 #include "aquarium.h"

@@ -64,7 +64,8 @@ SRC = src/main.c \
       src/state.c \
       src/cli.c \
       src/signals.c \
-      src/platform_time.c
+      src/platform_time.c \
+      src/platform_terminal.c
 
 HEADERS = include/fish.h \
           include/bubbles.h \
@@ -74,7 +75,8 @@ HEADERS = include/fish.h \
           include/state.h \
           include/cli.h \
           include/signals.h \
-          include/platform_time.h
+          include/platform_time.h \
+          include/platform_terminal.h
 
 .PHONY: all sanitize analyze lint test check clean
 

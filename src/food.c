@@ -1,4 +1,4 @@
-#include <ncurses.h>
+#include "platform_terminal.h"
 #include <stdlib.h>
 #include <math.h>
 
