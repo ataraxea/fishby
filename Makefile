@@ -1,4 +1,6 @@
 CC = cc
+CLANG = clang
+CPPCHECK = cppcheck
 
 CPPFLAGS = -Iinclude
 CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O2
@@ -32,6 +34,21 @@ SAN_CFLAGS = -std=c11 \
 
 SAN_LDFLAGS = -fsanitize=address,undefined
 
+ANALYZE_FLAGS = --analyze \
+                -std=c11 \
+                -Wall \
+                -Wextra \
+                -Wpedantic \
+                -Werror \
+                -Xanalyzer -analyzer-output=text
+
+LINT_FLAGS = --enable=warning,style,performance,portability \
+             --std=c11 \
+             --language=c \
+             --inconclusive \
+             --error-exitcode=1 \
+             --inline-suppr
+
 TARGET = fishby
 SAN_TARGET = fishby-san
 
@@ -54,7 +71,7 @@ HEADERS = include/fish.h \
           include/cli.h \
           include/signals.h
 
-.PHONY: all sanitize clean
+.PHONY: all sanitize analyze lint check clean
 
 all: $(TARGET)
 
@@ -70,6 +87,14 @@ $(SAN_TARGET): $(SRC) $(HEADERS) Makefile
 	$(CC) $(CPPFLAGS) $(SAN_CFLAGS) \
 		$(SRC) -o $(SAN_TARGET) \
 		$(LDFLAGS) $(SAN_LDFLAGS) $(LDLIBS)
+
+analyze:
+	$(CLANG) $(CPPFLAGS) $(ANALYZE_FLAGS) $(SRC)
+
+lint:
+	$(CPPCHECK) $(CPPFLAGS) $(LINT_FLAGS) $(SRC)
+
+check: all sanitize analyze lint
 
 clean:
 	rm -f $(TARGET) $(SAN_TARGET)
