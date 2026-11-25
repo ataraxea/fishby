@@ -1,5 +1,5 @@
 #include <math.h>
-#include <limits.h>
+#include <stdint.h>
 
 #include "pet.h"
 
@@ -61,10 +61,10 @@ void pet_feed(Pet *pet, unsigned int amount)
 
     pet->happy_timer = HAPPY_DURATION;
 
-    if (ULONG_MAX - pet->eaten >= amount)
+    if (UINT64_MAX - pet->eaten >= amount)
         pet->eaten += amount;
     else
-        pet->eaten = ULONG_MAX;
+        pet->eaten = UINT64_MAX;
 
     pet_update_mood(pet);
 }

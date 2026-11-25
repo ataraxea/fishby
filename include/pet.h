@@ -1,6 +1,8 @@
 #ifndef FISHBY_PET_H
 #define FISHBY_PET_H
 
+#include <stdint.h>
+
 typedef enum {
     MOOD_CHILL,
     MOOD_HAPPY,
@@ -12,7 +14,7 @@ typedef enum {
 typedef struct {
     float hunger;
     float happy_timer;
-    unsigned long eaten;
+    uint64_t eaten;
     PetMood mood;
 } Pet;
 

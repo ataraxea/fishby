@@ -3,6 +3,7 @@
 #include "platform_terminal.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <time.h>
 #include <string.h>
 
@@ -164,7 +165,7 @@ static void draw_status(
             status,
             sizeof(status),
             "[F] Feed | [Q] Quit | Hunger: %d%%"
-            " | Mood: %s | Eaten: %lu"
+            " | Mood: %s | Eaten: %" PRIu64
             " | FPS: %.0f/%d",
             (int)pet->hunger,
             pet_mood_name(pet),
@@ -177,7 +178,7 @@ static void draw_status(
             status,
             sizeof(status),
             "FPS: %.0f/%d | F/Q | H:%d%%"
-            " | %s | E:%lu",
+            " | %s | E:%" PRIu64,
             fps->measured,
             options->fps,
             (int)pet->hunger,

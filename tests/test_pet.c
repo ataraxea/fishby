@@ -1,5 +1,5 @@
 #include <assert.h>
-#include <limits.h>
+#include <stdint.h>
 #include <math.h>
 #include <stdio.h>
 
@@ -96,15 +96,15 @@ static void test_counter_overflow(void)
     Pet pet;
     pet_init(&pet);
 
-    pet.eaten = ULONG_MAX - 1;
+    pet.eaten = UINT64_MAX - 1;
 
     pet_feed(&pet, 3);
 
-    assert(pet.eaten == ULONG_MAX);
+    assert(pet.eaten == UINT64_MAX);
 
     pet_feed(&pet, 1);
 
-    assert(pet.eaten == ULONG_MAX);
+    assert(pet.eaten == UINT64_MAX);
 }
 
 static void test_empty_feed(void)

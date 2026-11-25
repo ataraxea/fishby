@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <errno.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -186,7 +187,7 @@ void state_close(int dir)
 
 static int parse_number(
     char **p,
-    unsigned long *value
+    uint64_t *value
 )
 {
     if (**p < '0' || **p > '9')
@@ -196,13 +197,15 @@ static int parse_number(
 
     errno = 0;
 
-    unsigned long n = strtoul(*p, &end, 10);
+    uintmax_t n = strtoumax(*p, &end, 10);
 
-    if (errno == ERANGE || *end != '\n')
+    if (errno == ERANGE ||
+        n > UINT64_MAX ||
+        *end != '\n')
         return -1;
 
     *p = end + 1;
-    *value = n;
+    *value = (uint64_t)n;
 
     return 0;
 }
@@ -273,8 +276,8 @@ int state_load(int dir, Pet *pet)
 
     char *p = buf + 8;
 
-    unsigned long hunger;
-    unsigned long eaten;
+    uint64_t hunger;
+    uint64_t eaten;
 
     if (parse_number(&p, &hunger) < 0 ||
         hunger > 100000 ||
@@ -321,7 +324,7 @@ int state_save(int dir, const Pet *pet)
     int n = snprintf(
         buf,
         sizeof(buf),
-        "FISHBY1\n%lu\n%lu\n",
+        "FISHBY1\n%lu\n%" PRIu64 "\n",
         (unsigned long)lroundf(
             pet->hunger * 1000.0f
         ),
