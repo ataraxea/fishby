@@ -18,7 +18,22 @@ HARDEN_LDFLAGS = -pie \
                  -Wl,-z,now \
                  -Wl,-z,noexecstack
 
+SAN_CFLAGS = -std=c11 \
+             -Wall \
+             -Wextra \
+             -Wpedantic \
+             -Werror \
+             -O1 \
+             -g3 \
+             -fno-omit-frame-pointer \
+             -fno-optimize-sibling-calls \
+             -fsanitize=address,undefined \
+             -fno-sanitize-recover=all
+
+SAN_LDFLAGS = -fsanitize=address,undefined
+
 TARGET = fishby
+SAN_TARGET = fishby-san
 
 SRC = src/main.c \
       src/fish.c \
@@ -39,7 +54,7 @@ HEADERS = include/fish.h \
           include/cli.h \
           include/signals.h
 
-.PHONY: all clean
+.PHONY: all sanitize clean
 
 all: $(TARGET)
 
@@ -49,5 +64,12 @@ $(TARGET): $(SRC) $(HEADERS) Makefile
 		$(SRC) -o $(TARGET) \
 		$(LDFLAGS) $(HARDEN_LDFLAGS) $(LDLIBS)
 
+sanitize: $(SAN_TARGET)
+
+$(SAN_TARGET): $(SRC) $(HEADERS) Makefile
+	$(CC) $(CPPFLAGS) $(SAN_CFLAGS) \
+		$(SRC) -o $(SAN_TARGET) \
+		$(LDFLAGS) $(SAN_LDFLAGS) $(LDLIBS)
+
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(SAN_TARGET)
