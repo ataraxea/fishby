@@ -7,3 +7,7 @@ core
 /tests/test_pet
 
 /tests/test_state
+
+/build/
+
+/build-*/
