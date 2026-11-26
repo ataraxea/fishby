@@ -1,8 +1,9 @@
 CC = cc
 CLANG = clang
 CPPCHECK = cppcheck
+VERSION := $(strip $(shell cat VERSION))
 
-CPPFLAGS = -Iinclude
+CPPFLAGS = -Iinclude -DFISHBY_VERSION=\"$(VERSION)\"
 CFLAGS = -std=c11 -Wall -Wextra -Wpedantic -O2
 LDFLAGS =
 LDLIBS = -lncurses -lm
@@ -76,13 +77,15 @@ HEADERS = include/fish.h \
           include/cli.h \
           include/signals.h \
           include/platform_time.h \
-          include/platform_terminal.h
+          include/platform_terminal.h \
+          include/version.h
+
 
 .PHONY: all sanitize analyze lint test check clean
 
 all: $(TARGET)
 
-$(TARGET): $(SRC) $(HEADERS) Makefile
+$(TARGET): $(SRC) $(HEADERS) Makefile VERSION
 	$(CC) $(CPPFLAGS) $(HARDEN_CPPFLAGS) \
 		$(CFLAGS) $(HARDEN_CFLAGS) \
 		$(SRC) -o $(TARGET) \
@@ -90,7 +93,7 @@ $(TARGET): $(SRC) $(HEADERS) Makefile
 
 sanitize: $(SAN_TARGET)
 
-$(SAN_TARGET): $(SRC) $(HEADERS) Makefile
+$(SAN_TARGET): $(SRC) $(HEADERS) Makefile VERSION
 	$(CC) $(CPPFLAGS) $(SAN_CFLAGS) \
 		$(SRC) -o $(SAN_TARGET) \
 		$(LDFLAGS) $(SAN_LDFLAGS) $(LDLIBS)

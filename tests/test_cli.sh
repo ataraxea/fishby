@@ -4,6 +4,9 @@ set -eu
 
 BIN="${1:-./fishby}"
 
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="$(cat "$ROOT_DIR/VERSION")"
+
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf -- "$TMP_DIR"' EXIT
 
@@ -41,9 +44,10 @@ grep -q 'Usage: fishby' "$TMP_DIR/output"
 expect_success -h
 
 expect_success --version
-grep -q '^fishby ' "$TMP_DIR/output"
+grep -Fxq "fishby $VERSION" "$TMP_DIR/output"
 
 expect_success -v
+grep -Fxq "fishby $VERSION" "$TMP_DIR/output"
 
 expect_failure --unknown
 expect_failure --fps

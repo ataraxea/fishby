@@ -1,0 +1,220 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  linux:
+    name: Package Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Verify release version
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(cat VERSION)"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            libncurses-dev \
+            cmake
+
+      - name: Configure
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON \
+            -DFISHBY_HARDENING=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Create archive
+        run: |
+          NAME="fishby-${GITHUB_REF_NAME}-linux-x86_64"
+
+          mkdir -p "package/$NAME" dist
+
+          install -m 755 build/fishby "package/$NAME/"
+
+          cp LICENSE README.md CHANGELOG.md \
+            SECURITY.md THIRD_PARTY_NOTICES.md \
+            "package/$NAME/"
+
+          tar -czf "dist/$NAME.tar.gz" \
+            -C package "$NAME"
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-linux
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Package Windows x86_64
+    runs-on: windows-2025
+    timeout-minutes: 25
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Setup MinGW environment
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            make
+            zip
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+
+      - name: Verify release version
+        run: |
+          test "$GITHUB_REF_NAME" = "v$(tr -d '\r\n' < VERSION)"
+
+      - name: Build PDCurses
+        run: |
+          git clone --depth 1 --branch 3.9 \
+            https://github.com/wmcbrine/PDCurses.git \
+            "$RUNNER_TEMP/PDCurses"
+
+          make -C "$RUNNER_TEMP/PDCurses/wincon" \
+            CC=gcc \
+            AR=ar \
+            WINDRES=windres \
+            pdcurses.a
+
+      - name: Configure
+        run: |
+          PDC_ROOT="$(cygpath -m "$RUNNER_TEMP/PDCurses")"
+
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=gcc \
+            -DBUILD_TESTING=ON \
+            -DFISHBY_HARDENING=ON \
+            -DPDCURSES_INCLUDE_DIR="$PDC_ROOT" \
+            -DPDCURSES_LIBRARY="$PDC_ROOT/wincon/pdcurses.a" \
+            -DCMAKE_EXE_LINKER_FLAGS="-static"
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Run tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Create archive
+        run: |
+          NAME="fishby-${GITHUB_REF_NAME}-windows-x86_64"
+
+          mkdir -p "package/$NAME/licenses" dist
+
+          cp build/fishby.exe "package/$NAME/"
+
+          cp LICENSE README.md CHANGELOG.md \
+            SECURITY.md THIRD_PARTY_NOTICES.md \
+            "package/$NAME/"
+
+          cp -R /ucrt64/share/licenses/. \
+            "package/$NAME/licenses/"
+
+          cp "$RUNNER_TEMP/PDCurses/README.md" \
+            "package/$NAME/licenses/PDCurses-README.md"
+
+          (
+            cd package
+            zip -qr "../dist/$NAME.zip" "$NAME"
+          )
+
+      - name: Upload archive
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Create draft release
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download archives
+        uses: actions/download-artifact@v7
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify archives
+        run: |
+          ls -lah dist/
+
+          LINUX="dist/fishby-${GITHUB_REF_NAME}-linux-x86_64.tar.gz"
+          WINDOWS="dist/fishby-${GITHUB_REF_NAME}-windows-x86_64.zip"
+
+          test -s "$LINUX" || {
+            echo "Missing archive: $LINUX"
+            exit 1
+          }
+
+          test -s "$WINDOWS" || {
+            echo "Missing archive: $WINDOWS"
+            exit 1
+          }
+
+          tar -tzf "$LINUX"
+          unzip -t "$WINDOWS"
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+          sha256sum -c SHA256SUMS.txt
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            dist/* \
+            --verify-tag \
+            --draft \
+            --title "fishby $GITHUB_REF_NAME" \
+            --generate-notes

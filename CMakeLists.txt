@@ -1,7 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
 
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FISHBY_VERSION)
+string(STRIP "${FISHBY_VERSION}" FISHBY_VERSION)
+
+if(NOT FISHBY_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
+    message(FATAL_ERROR "Invalid fishby version: ${FISHBY_VERSION}")
+endif()
+
+set_property(DIRECTORY APPEND PROPERTY
+    CMAKE_CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/VERSION"
+)
+
 project(fishby
-    VERSION 0.1.0
+    VERSION ${FISHBY_VERSION}
     DESCRIPTION "A tiny terminal aquarium"
     LANGUAGES C
 )
@@ -135,6 +147,10 @@ endfunction()
 
 # Main executable
 add_executable(fishby ${FISHBY_SOURCES})
+
+target_compile_definitions(fishby PRIVATE
+    FISHBY_VERSION="${PROJECT_VERSION}"
+)
 
 fishby_configure_target(fishby)
 

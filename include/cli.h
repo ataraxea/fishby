@@ -1,7 +1,6 @@
 #ifndef FISHBY_CLI_H
 #define FISHBY_CLI_H
 
-#define FISHBY_VERSION "0.1.0-dev"
 #define MAX_NAME_LENGTH 24
 
 typedef enum {

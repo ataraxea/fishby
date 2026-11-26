@@ -3,7 +3,9 @@
 #include <string.h>
 #include <errno.h>
 
+
 #include "cli.h"
+#include "version.h"
 
 #define DEFAULT_FPS 60
 #define MIN_FPS 10
